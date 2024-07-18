@@ -1,5 +1,4 @@
 https://coffee.botanica.tools/*
   Access-Control-Allow-Origin: *
-  Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
-  Access-Control-Allow-Headers: Origin, X-Requested-With, Content-Type, Accept, Authorization, currentappos, accept-language, currentappversion, user-agent
-
+  Access-Control-Allow-Methods: *
+  Access-Control-Allow-Headers: *

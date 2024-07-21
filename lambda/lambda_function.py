@@ -107,7 +107,13 @@ async def list_machines(cloud_client: LaMarzoccoCloudClient) -> Dict[str, LaMarz
 
     return machines
 
+def parse_event(event: Dict) -> Dict:
+    if "body" in event:
+        return event["body"]
+    raise LaMarzoccoLambdaError("Invalid event: " + str(event))
+
 async def async_handler(event, _) -> Response:
+    event = parse_event(event)
     if "action" not in event:
         raise LaMarzoccoLambdaError("missing action field: " + str(event))
 

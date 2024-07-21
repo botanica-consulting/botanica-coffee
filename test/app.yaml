@@ -1,4 +1,4 @@
-runtime: python312  # or python38 if you prefer
+runtime: python312  
 entrypoint: gunicorn -b :$PORT main:app
 
 handlers:
@@ -10,7 +10,11 @@ handlers:
 
 env_variables:
   GOOGLE_CLIENT_ID: '41745357216-9u51cljq520envp20l7ko3as88hdqfbc.apps.googleusercontent.com'
-  GOOGLE_CLIENT_SECRET: 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'
-  GOOGLE_REDIRECT_URI: 'https://localhost:5000/login/callback'
+  GOOGLE_CLIENT_SECRET: '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'
+  GOOGLE_REDIRECT_URI: 'https://coffee-sso.lm.r.appspot.com/login/callback'
   SECRET_KEY: '3f9362aad4bc05a67efb29b25ae7232a3c5672cb0eb6e12a'
-
+  ALLOWED_DOMAINS: botanica.consulting
+  USERNAME: 'elisha+mrz@botanica.consulting'
+  GOOGLE_SECRET_RESOURCE_NAME: 'projects/41745357216/secrets/elisha_mrz_botanica_consulting_password/versions/1'
+  NAME: 'MR018360'
+  SERIAL: 'MR018360'

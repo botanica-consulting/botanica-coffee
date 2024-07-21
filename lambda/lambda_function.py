@@ -2,6 +2,8 @@ import asyncio
 import os
 import logging 
 from typing import Dict
+from urllib.parse import parse_qs
+import json
 
 from dataclasses import dataclass, asdict
 from lmcloud.client_cloud import LaMarzoccoCloudClient
@@ -27,8 +29,12 @@ class LaMarzoccoLambdaError(Exception):
 
 @dataclass
 class Response:
-    status: str
-    body: Dict
+    statusCode: int
+    body: str
+
+    def __init__(self, statusCode: int, body: Dict):
+        self.statusCode = statusCode
+        self.body = json.dumps(body)
 
     def to_dict(self):
         return asdict(self)
@@ -108,9 +114,19 @@ async def list_machines(cloud_client: LaMarzoccoCloudClient) -> Dict[str, LaMarz
     return machines
 
 def parse_event(event: Dict) -> Dict:
-    if "body" in event:
-        return event["body"]
-    raise LaMarzoccoLambdaError("Invalid event: " + str(event))
+    content_type = event["headers"].get("content-type")
+    logger.debug(f"Got event with Content-Type {content_type}")
+    match content_type.lower():
+        case "application/json":
+            if "body" in event:
+                return json.loads(event["body"])
+            raise LaMarzoccoLambdaError("Invalid event: " + str(event))
+        case "application/x-www-form-urlencoded":
+            parsed_data = parse_qs(event["body"])
+            return {k: v[0] for k, v in parsed_data.items()}
+        case _:
+            raise LaMarzoccoLambdaError(f"Unsupported Content-Type: {content_type}")
+        
 
 async def async_handler(event, _) -> Response:
     event = parse_event(event)
@@ -123,37 +139,37 @@ async def async_handler(event, _) -> Response:
             case "list_machines":
                 cloud_client = await login()
                 machines = await list_machines(cloud_client)
-                return Response("success", machines)
+                return Response(200, machines)
             case "turn_on":
                 cloud_client = await login()
                 machine = await get_machine(cloud_client)
                 try:
                     if not await machine.set_power(True):
-                        return Response("error", {"message": "failed to turn on machine"})
-                    return Response("success", {})
+                        return Response(401, {"message": "failed to turn on machine"})
+                    return Response(200, {})
                 except RequestNotSuccessful as e:
-                    return Response("error", {"message": "failed to turn on machine", "e": str(e)})
+                    return Response(400, {"message": "failed to turn on machine", "e": str(e)})
             case "turn_off":
                 cloud_client = await login()
                 machine = await get_machine(cloud_client)
                 try:
                     if not await machine.set_power(False):
-                        return Response("error", {"message": "failed to turn off machine"})
-                    return Response("success", {})
+                        return Response(400, {"message": "failed to turn off machine"})
+                    return Response(200, {})
                 except RequestNotSuccessful as e:
-                    return Response("error", {"message": "failed to turn off machine", "e": str(e)})
+                    return Response(400, {"message": "failed to turn off machine", "e": str(e)})
             case "get_status":
                 cloud_client = await login()
                 machine = await get_machine(cloud_client)
                 config = machine.config
                 status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
-                return Response("success", status.to_dict())
+                return Response(200, status.to_dict())
             case _:
-                return Response("error", {"message": f"unknown action {event['action']}"})
+                return Response(400, {"message": f"unknown action {event['action']}"})
     except RequestNotSuccessful as e:
-        return Response("error", {"message": "request not successful", "e": str(e)})
+        return Response(400, {"message": "request not successful", "e": str(e)})
     except LaMarzoccoLambdaError as e:
-        return Response("error", {"message": str(e)})
+        return Response(400, {"message": str(e)})
 
 
 def handler(event, context):

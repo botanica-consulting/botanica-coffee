@@ -1,12 +1,12 @@
 import os
 import email_validator
 from dataclasses import dataclass, asdict
-from flask import Flask, redirect, url_for, session, request, abort
+from flask import Flask, redirect, url_for, session, request, abort, g, jsonify
+import json
+import logging
 from oauthlib.oauth2 import WebApplicationClient
 import requests
-import logging
 
-import asyncio
 from typing import Dict
 
 from dataclasses import dataclass, asdict
@@ -16,7 +16,8 @@ from lmcloud.const import MachineModel, BoilerType
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 from lmcloud.models import LaMarzoccoMachineConfig
 
-from google.cloud import secretmanager
+from google.cloud import secretmanager_v1 as secretmanager
+secretmanager.SecretManagerServiceAsyncClient
 
 
 USERNAME = os.getenv("USERNAME")
@@ -51,29 +52,52 @@ def get_google_provider_cfg():
     return requests.get(GOOGLE_DISCOVERY_URL).json()
 
 @app.before_request
-def before_request():
+async def before_request():
     if 'email' not in session and request.endpoint not in ['login', 'callback']:
         return redirect(url_for('login'))
 
-@app.route("/")
-def index():
+@app.route("/whoami")
+async def index():
     return f'Hello, {session["email"]}!'
 
 @app.route("/status")
-def status():
-    return "OK"
-
+async def status():
+    cloud_client = await get_lamarzocco_cloud_client()
+    machine = await get_machine(cloud_client)
+    config = machine.config
+    status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
+    return jsonify(status.to_dict()), 200
 
 @app.route("/turn_on")
-def turn_on():
-    return "OK"
+async def turn_on():
+    cloud_client = await get_lamarzocco_cloud_client()
+    machine = await get_machine(cloud_client)
+    try:
+        if not await machine.set_power(True):
+            return jsonify(
+                    {
+                        "message": f"failed to turn on machine {machine.name}"
+                    }), 400
+        return jsonify({"message": f"turned on machine {machine.name}"}), 200
+    except RequestNotSuccessful as e:
+        return jsonify({"message": "failed to turn on machine", "e": str(e)}), 400
 
 @app.route("/turn_off")
-def turn_off():
-    return "OK"
+async def turn_off():
+    cloud_client = await get_lamarzocco_cloud_client()
+    machine = await get_machine(cloud_client)
+    try:
+        if not await machine.set_power(False):
+            return jsonify(
+                    {
+                        "message": f"failed to turn off machine {machine.name}"
+                    }), 400
+        return jsonify({"message": f"turned on machine {machine.name}"}), 200
+    except RequestNotSuccessful as e:
+        return jsonify({"message": "failed to turn off machine", "e": str(e)}), 400
 
 @app.route("/login")
-def login():
+async def login():
     google_provider_cfg = get_google_provider_cfg()
     authorization_endpoint = google_provider_cfg["authorization_endpoint"]
 
@@ -85,7 +109,7 @@ def login():
     return redirect(request_uri)
 
 @app.route("/login/callback")
-def callback():
+async def callback():
     code = request.args.get("code")
 
     google_provider_cfg = get_google_provider_cfg()
@@ -116,12 +140,20 @@ def callback():
     emailinfo = email_validator.validate_email(email)
     if emailinfo.domain.lower() not in ALLOWED_DOMAINS:
         return abort(403)
-    return redirect(url_for("index"))
+
+    return redirect(url_for("status"))
 
 @app.route("/logout")
-def logout():
+async def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+async def get_lamarzocco_cloud_client() -> LaMarzoccoCloudClient:
+    if 'cloud_client' not in g:
+        g.cloud_client = await la_marzocco_login()
+
+    return g.cloud_client
 
 class LaMarzoccoLambdaError(Exception):
     pass
@@ -152,12 +184,12 @@ class LaMarzoccoMachineStatus:
     turned_on: bool
 
     steam_boiler_on: bool
-    steam_boiler_temp: int
-    steam_boiler_target_temp: int
+    steam_boiler_temp: float
+    steam_boiler_target_temp: float
 
     main_boiler_on: bool
-    main_boiler_temp: int
-    main_boiler_target_temp: int
+    main_boiler_temp: float
+    main_boiler_target_temp: float
 
     @staticmethod
     def from_la_marzocco_machine_config(config: LaMarzoccoMachineConfig) -> "LaMarzoccoMachineStatus":
@@ -175,12 +207,25 @@ class LaMarzoccoMachineStatus:
     def to_dict(self):
         return asdict(self)
 
-def 
+async def get_google_secret() -> str:
+    # Create a client
+    client = secretmanager.SecretManagerServiceAsyncClient()
+
+    # Initialize request argument(s)
+    request = secretmanager.AccessSecretVersionRequest(
+        name="name_value",
+    )
+
+    # Make the request
+    response = await client.access_secret_version(request=request)
+
+    return response.payload.data.decode("UTF-8")
 
 async def la_marzocco_login() -> LaMarzoccoCloudClient:
+    logger.info("accessing google secret manager")
+    password = await get_google_secret()
     logger.info("creating LaMarzoccoCloudClient object")
-    logger.info("creating LaMarzoccoCloudClient object")
-    cloud_client = LaMarzoccoCloudClient(USERNAME, PASSWORD)
+    cloud_client = LaMarzoccoCloudClient(USERNAME, password)
     return cloud_client
 
 async def get_machine(cloud_client: LaMarzoccoCloudClient) -> LaMarzoccoMachine:

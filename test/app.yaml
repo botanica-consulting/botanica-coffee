@@ -1,0 +1,16 @@
+runtime: python312  # or python38 if you prefer
+entrypoint: gunicorn -b :$PORT main:app
+
+handlers:
+- url: /static
+  static_dir: static
+
+- url: /.*
+  script: auto
+
+env_variables:
+  GOOGLE_CLIENT_ID: '41745357216-9u51cljq520envp20l7ko3as88hdqfbc.apps.googleusercontent.com'
+  GOOGLE_CLIENT_SECRET: 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'
+  GOOGLE_REDIRECT_URI: 'https://localhost:5000/login/callback'
+  SECRET_KEY: '3f9362aad4bc05a67efb29b25ae7232a3c5672cb0eb6e12a'
+

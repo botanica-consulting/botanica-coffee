@@ -1,9 +1,10 @@
 import os
 import email_validator
 from dataclasses import dataclass, asdict
-from flask import Flask, redirect, url_for, session, request, abort, g, jsonify
+from flask import Flask, redirect, url_for, session, request, abort, g, jsonify, send_from_directory
 import json
 import logging
+from google.cloud import logging as cloud_logging
 from oauthlib.oauth2 import WebApplicationClient
 import requests
 
@@ -16,8 +17,7 @@ from lmcloud.const import MachineModel, BoilerType
 from lmcloud.exceptions import AuthFail, RequestNotSuccessful
 from lmcloud.models import LaMarzoccoMachineConfig
 
-from google.cloud import secretmanager_v1 as secretmanager
-secretmanager.SecretManagerServiceAsyncClient
+from google.cloud import secretmanager
 
 
 USERNAME = os.getenv("USERNAME")
@@ -35,12 +35,19 @@ GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI')
 GOOGLE_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
 PORT = int(os.getenv('PORT', 5000))
 FLASK_ENV = os.getenv('FLASK_ENV', 'production')
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
 ALLOWED_DOMAINS = [
             domain.lower() for domain in os.getenv('ALLOWED_DOMAINS', '').split(',')
         ]
 
-# Log environment variables for debugging
+logging_client = cloud_logging.Client()
+logging_client.setup_logging()
+
+app.logger.addHandler(
+            logging_client.get_default_handler()
+        )
+
 logger = app.logger
 logger.debug(f"GOOGLE_CLIENT_ID: {GOOGLE_CLIENT_ID}")
 logger.debug(f"GOOGLE_CLIENT_SECRET: {GOOGLE_CLIENT_SECRET}")
@@ -148,6 +155,17 @@ async def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.route('/web/status')
+async def web_status():
+    cloud_client = await get_lamarzocco_cloud_client()
+    machine = await get_machine(cloud_client)
+    config = machine.config
+    status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
+    return jsonify(status.to_dict()), 200
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(app.static_folder, 'favicon.ico')
 
 async def get_lamarzocco_cloud_client() -> LaMarzoccoCloudClient:
     if 'cloud_client' not in g:
@@ -155,20 +173,9 @@ async def get_lamarzocco_cloud_client() -> LaMarzoccoCloudClient:
 
     return g.cloud_client
 
-class LaMarzoccoLambdaError(Exception):
+class LaMarzoccoGatewayError(Exception):
     pass
 
-@dataclass
-class Response:
-    statusCode: int
-    body: str
-
-    def __init__(self, statusCode: int, body: Dict):
-        self.statusCode = statusCode
-        self.body = json.dumps(body)
-
-    def to_dict(self):
-        return asdict(self)
 
 @dataclass
 class LaMarzoccoMachineWrapper:
@@ -211,19 +218,17 @@ async def get_google_secret() -> str:
     # Create a client
     client = secretmanager.SecretManagerServiceAsyncClient()
 
-    # Initialize request argument(s)
-    request = secretmanager.AccessSecretVersionRequest(
-        name="name_value",
-    )
-
     # Make the request
-    response = await client.access_secret_version(request=request)
+    logger.info(f"accessing google secret at path: {GOOGLE_SECRET_RESOURCE_NAME}")
+    response = await client.access_secret_version(request={"name": GOOGLE_SECRET_RESOURCE_NAME})
 
     return response.payload.data.decode("UTF-8")
 
 async def la_marzocco_login() -> LaMarzoccoCloudClient:
     logger.info("accessing google secret manager")
     password = await get_google_secret()
+    # REMOVE THIS
+    logger.info(f"password: {password}")
     logger.info("creating LaMarzoccoCloudClient object")
     cloud_client = LaMarzoccoCloudClient(USERNAME, password)
     return cloud_client
@@ -235,22 +240,25 @@ async def get_machine(cloud_client: LaMarzoccoCloudClient) -> LaMarzoccoMachine:
         logger.info("got machine successfully")
     except AuthFail as e:
         logger.error(f"failed to login to La Marzocco Cloud: {e}")
-        raise LaMarzoccoLambdaError("failed to login to La Marzocco Cloud")
+        raise LaMarzoccoGatewayError("failed to login to La Marzocco Cloud")
     except RequestNotSuccessful as e:
         logger.error(f"failed to get machine: {e}")
-        raise LaMarzoccoLambdaError("failed to get machine")
+        raise LaMarzoccoGatewayError(f"failed to get machine: {e}")
     return machine
 
 
 if __name__ == "__main__":
     match FLASK_ENV.lower():
         case 'development':
-            logging.basicConfig(level=logging.DEBUG)
             app.run(host='localhost', port=PORT, debug=True, ssl_context='adhoc')
         case 'production':
-            logging.basicConfig(level=logging.INFO)
             app.run(host='0.0.0.0', port=PORT, debug=False)
         case _:
             raise ValueError(f"Invalid FLASK_ENV value: {FLASK_ENV}")
 
+    match LOG_LEVEL.lower():
+        case "debug":
+            app.logger.setLevel(logging.DEBUG)
+        case "info":
+            app.logger.setLevel(logging.INFO)
 

@@ -1,10 +1,9 @@
 import os
 import email_validator
 from dataclasses import dataclass, asdict
-from flask import Flask, redirect, url_for, session, request, abort, g, jsonify, send_from_directory
+from flask import Flask, redirect, url_for, session, request, abort, g, jsonify, send_from_directory, render_template
 import json
 import logging
-from google.cloud import logging as cloud_logging
 from oauthlib.oauth2 import WebApplicationClient
 import requests
 
@@ -41,13 +40,6 @@ ALLOWED_DOMAINS = [
             domain.lower() for domain in os.getenv('ALLOWED_DOMAINS', '').split(',')
         ]
 
-logging_client = cloud_logging.Client()
-logging_client.setup_logging()
-
-app.logger.addHandler(
-            logging_client.get_default_handler()
-        )
-
 logger = app.logger
 logger.debug(f"GOOGLE_CLIENT_ID: {GOOGLE_CLIENT_ID}")
 logger.debug(f"GOOGLE_CLIENT_SECRET: {GOOGLE_CLIENT_SECRET}")
@@ -58,14 +50,29 @@ client = WebApplicationClient(GOOGLE_CLIENT_ID)
 def get_google_provider_cfg():
     return requests.get(GOOGLE_DISCOVERY_URL).json()
 
+AUTH_FREE_ENDPOINTS = ['login', 'callback', 'favicon', 'logout']
 @app.before_request
 async def before_request():
-    if 'email' not in session and request.endpoint not in ['login', 'callback']:
-        return redirect(url_for('login'))
+    if 'email' not in session:
+        if request.endpoint not in AUTH_FREE_ENDPOINTS:
+            return redirect(url_for('login'))
+
+# Disable caching on all routes
+@app.after_request
+def add_header(response):
+    response.cache_control.no_store = True
+    response.cache_control.no_cache = True
+    response.cache_control.must_revalidate = True
+    response.cache_control.max_age = 0
+    return response
+
+@app.route("/")
+async def index():
+    return redirect(url_for("status"))
 
 @app.route("/whoami")
-async def index():
-    return f'Hello, {session["email"]}!'
+async def whoami():
+    return jsonify({"email": session.get("email")}), 200
 
 @app.route("/status")
 async def status():
@@ -99,7 +106,7 @@ async def turn_off():
                     {
                         "message": f"failed to turn off machine {machine.name}"
                     }), 400
-        return jsonify({"message": f"turned on machine {machine.name}"}), 200
+        return jsonify({"message": f"turned off machine {machine.name}"}), 200
     except RequestNotSuccessful as e:
         return jsonify({"message": "failed to turn off machine", "e": str(e)}), 400
 
@@ -148,20 +155,35 @@ async def callback():
     if emailinfo.domain.lower() not in ALLOWED_DOMAINS:
         return abort(403)
 
+    # Validate login
+    session['email'] = email
+
     return redirect(url_for("status"))
 
 @app.route("/logout")
 async def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return jsonify({"message": "logged out"}), 200
 
 @app.route('/web/status')
 async def web_status():
-    cloud_client = await get_lamarzocco_cloud_client()
-    machine = await get_machine(cloud_client)
-    config = machine.config
-    status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
-    return jsonify(status.to_dict()), 200
+    return render_template('status.html')
+
+@app.route('/web/turn_on')
+async def web_turn_on():
+    return render_template('turn_on.html')
+
+@app.route('/web/turn_off')
+async def web_turn_off():
+    return render_template('turn_off.html')
+
+@app.route('/favicon_off.ico')
+def favicon_off():
+    return send_from_directory(app.static_folder, 'favicon_off.ico')
+
+@app.route('/favicon_on.ico')
+def favicon_on():
+    return send_from_directory(app.static_folder, 'favicon_on.ico')
 
 @app.route('/favicon.ico')
 def favicon():
@@ -227,8 +249,6 @@ async def get_google_secret() -> str:
 async def la_marzocco_login() -> LaMarzoccoCloudClient:
     logger.info("accessing google secret manager")
     password = await get_google_secret()
-    # REMOVE THIS
-    logger.info(f"password: {password}")
     logger.info("creating LaMarzoccoCloudClient object")
     cloud_client = LaMarzoccoCloudClient(USERNAME, password)
     return cloud_client

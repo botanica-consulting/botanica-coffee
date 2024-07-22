@@ -3,3 +3,4 @@
 1. Set up status page with ON/OFF buttons
 1. Make all three PWAs 
 1. Fix dependencies
+1. Fix cloud logging (optional)

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Status</title>
+  <link rel="icon" href="{{ url_for('favicon') }}" type="image/x-icon">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest_status.json') }}">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 50px;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      background-color: #fff;
+    }
+
+    .button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 16px;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
+
+    .spinner {
+      text-align: center;
+      font-size: 24px;
+      margin-top: 20px;
+    }
+
+    .status-item {
+      margin: 10px 0;
+      text-align: left;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Machine Status</h1>
+    <div id="status">
+      <div class="status-item"><strong>Turned On:</strong> <span id="turned_on">Loading...</span></div>
+      <div class="status-item"><strong>Steam Boiler On:</strong> <span id="steam_boiler_on">Loading...</span></div>
+      <div class="status-item"><strong>Steam Boiler Temp:</strong> <span id="steam_boiler_temp">Loading...</span></div>
+      <div class="status-item"><strong>Steam Boiler Target Temp:</strong> <span
+          id="steam_boiler_target_temp">Loading...</span></div>
+      <div class="status-item"><strong>Main Boiler On:</strong> <span id="main_boiler_on">Loading...</span></div>
+      <div class="status-item"><strong>Main Boiler Temp:</strong> <span id="main_boiler_temp">Loading...</span></div>
+      <div class="status-item"><strong>Main Boiler Target Temp:</strong> <span
+          id="main_boiler_target_temp">Loading...</span></div>
+    </div>
+    <button class="button" id="refresh-button">Refresh</button>
+  </div>
+
+  <script>
+    async function fetchStatus() {
+      try {
+        const response = await fetch('/status');
+        const status = await response.json();
+        document.getElementById('turned_on').textContent = status.turned_on ? 'Yes' : 'No';
+        document.getElementById('steam_boiler_on').textContent = status.steam_boiler_on ? 'Yes' : 'No';
+        document.getElementById('steam_boiler_temp').textContent = status.steam_boiler_temp + ' °C';
+        document.getElementById('steam_boiler_target_temp').textContent = status.steam_boiler_target_temp + ' °C';
+        document.getElementById('main_boiler_on').textContent = status.main_boiler_on ? 'Yes' : 'No';
+        document.getElementById('main_boiler_temp').textContent = status.main_boiler_temp + ' °C';
+        document.getElementById('main_boiler_target_temp').textContent = status.main_boiler_target_temp + ' °C';
+      } catch (error) {
+        document.getElementById('status').textContent = 'Error loading status.';
+      }
+    }
+
+    document.getElementById('refresh-button').addEventListener('click', fetchStatus);
+
+    document.addEventListener('DOMContentLoaded', function () {
+      fetchStatus();
+      setInterval(fetchStatus, 5000); // Refresh every 5 seconds
+    });
+  </script>
+</body>
+
+</html>

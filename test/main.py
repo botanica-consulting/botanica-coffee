@@ -50,11 +50,12 @@ client = WebApplicationClient(GOOGLE_CLIENT_ID)
 def get_google_provider_cfg():
     return requests.get(GOOGLE_DISCOVERY_URL).json()
 
-AUTH_FREE_ENDPOINTS = ['login', 'callback', 'favicon', 'logout']
+AUTH_FREE_ENDPOINTS = ['login', 'callback', 'favicon', 'logout', 'index', 'favicon_off', 'favicon_on']
 @app.before_request
 async def before_request():
     if 'email' not in session:
         if request.endpoint not in AUTH_FREE_ENDPOINTS:
+            session['next'] = request.url
             return redirect(url_for('login'))
 
 # Disable caching on all routes
@@ -68,7 +69,7 @@ def add_header(response):
 
 @app.route("/")
 async def index():
-    return redirect(url_for("status"))
+    return redirect(url_for('web_status'))
 
 @app.route("/whoami")
 async def whoami():
@@ -157,8 +158,8 @@ async def callback():
 
     # Validate login
     session['email'] = email
-
-    return redirect(url_for("status"))
+    next = session.pop('next', url_for('web_status'))
+    return redirect(next)
 
 @app.route("/logout")
 async def logout():

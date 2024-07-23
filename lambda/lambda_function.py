@@ -4,6 +4,9 @@ import logging
 from typing import Dict
 from urllib.parse import parse_qs
 import json
+import boto3
+import copy
+import urllib.request
 
 from dataclasses import dataclass, asdict
 from lmcloud.client_cloud import LaMarzoccoCloudClient
@@ -130,7 +133,7 @@ async def list_machines(
 
 def parse_event(event: Dict) -> Dict:
     logger.info(str(event))
-    content_type = event["headers"].get(
+    content_type = event.get("headers", {}).get(
         "content-type", "application/x-www-form-urlencoded"
     )
     logger.debug(f"Got event with Content-Type {content_type}")
@@ -148,26 +151,53 @@ def parse_event(event: Dict) -> Dict:
 
 async def turn_on() -> Response:
     cloud_client = await login()
+    logger.info("Logged in")
     machine = await get_machine(cloud_client)
+    logger.info("Got machine")
     try:
         if not await machine.set_power(True):
+            logger.info("Set power failed")
             return Response(401, {"message": "failed to turn on machine"})
+        logger.info("Set power success")
         return Response(200, {})
     except RequestNotSuccessful as e:
         return Response(400, {"message": "failed to turn on machine", "e": str(e)})
 
 
-async def async_slack_handler(event) -> Response:
-    if "/tired" == event["command"]:
-        turn_on()
+async def async_slack_handler(event, parsed_event, context, is_background) -> Response:
+    if ["/tired"] == parsed_event["command"] or "/tired" == parsed_event["command"]:
+        if is_background:
+            t = await turn_on()
+            response_message = {
+                "text": "The machine has been turned on."
+            }
+            data = json.dumps(response_message).encode('utf-8')
+            req = urllib.request.Request(parsed_event['response_url'], 
+                                         data=data, 
+                                         headers={'Content-Type': 'application/json'})
+            urllib.request.urlopen(req)
 
-    raise ValueError("IDK what to do")
+            return t
+        else:
+            # Invoke the background processing asynchronously
+            lambda_client = boto3.client("lambda")
+            lambda_client.invoke(
+                FunctionName=context.function_name,
+                InvocationType="Event",  # Asynchronous invocation
+                Payload=json.dumps({"background": True, **event}),
+            )
+
+            return Response(202, 'Hmm... wait a sec!')
+
+    raise ValueError(f"IDK what to do, {event}")
 
 
-async def async_handler(event, _) -> Response:
+async def async_handler(event, context) -> Response:
+    is_background = "background" in event
+    original_event = copy.copy(event)
     event = parse_event(event)
     if "action" not in event:
-        return async_slack_handler(event)
+        return await async_slack_handler(original_event, event, context, is_background)
 
     logger.info(f'Got action: {event["action"]}')
     try:
@@ -177,7 +207,7 @@ async def async_handler(event, _) -> Response:
                 machines = await list_machines(cloud_client)
                 return Response(200, machines)
             case "turn_on":
-                return turn_on()
+                return await turn_on()
             case "turn_off":
                 cloud_client = await login()
                 machine = await get_machine(cloud_client)

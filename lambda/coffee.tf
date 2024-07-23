@@ -78,6 +78,11 @@ resource "aws_iam_role" "lambda_iam_role" {
           Resource = "arn:aws:logs:*:*:*",
           Effect   = "Allow"
         },
+        {
+          Action = "lambda:InvokeFunction",
+          Resource = "arn:aws:lambda:*:*:function:coffee_lambda",
+          Effect   = "Allow"
+        },
       ]
     })
   }

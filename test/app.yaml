@@ -1,5 +1,5 @@
 runtime: python312  
-entrypoint: gunicorn -b :$PORT main:app
+entrypoint: gunicorn -b :$PORT app:app
 
 handlers:
 - url: /static
@@ -18,5 +18,3 @@ env_variables:
   GOOGLE_SECRET_RESOURCE_NAME: 'projects/41745357216/secrets/elisha_mrz_botanica_consulting_password/versions/1'
   NAME: 'MR018360'
   SERIAL_NUMBER: 'MR018360'
-  LOG_LEVEL: 'DEBUG'
-  PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python

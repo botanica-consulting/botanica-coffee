@@ -58,15 +58,6 @@ async def before_request():
             session['next'] = request.url
             return redirect(url_for('login'))
 
-# Disable caching on all routes
-@app.after_request
-def add_header(response):
-    response.cache_control.no_store = True
-    response.cache_control.no_cache = True
-    response.cache_control.must_revalidate = True
-    response.cache_control.max_age = 0
-    return response
-
 @app.route("/")
 async def index():
     return redirect(url_for('web_status'))
@@ -189,6 +180,10 @@ def favicon_on():
 @app.route('/favicon.ico')
 def favicon():
     return send_from_directory(app.static_folder, 'favicon.ico')
+
+@app.route('/service-worker.js')
+def service_worker():
+    return send_from_directory(app.static_folder, 'service-worker.js')
 
 async def get_lamarzocco_cloud_client() -> LaMarzoccoCloudClient:
     if 'cloud_client' not in g:

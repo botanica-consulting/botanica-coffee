@@ -29,6 +29,21 @@
       font-size: 24px;
       margin-top: 20px;
     }
+
+    .button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 16px;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
   </style>
 </head>
 
@@ -36,6 +51,7 @@
   <div class="container">
     <h1>Turn On Machine</h1>
     <div class="spinner" id="spinner">Turning on...</div>
+    <button class="button" id="turn-on-button">Turn On</button>
   </div>
 
   <script>
@@ -45,13 +61,17 @@
       document.getElementById('spinner').textContent = result.message;
     }
 
+    document.getElementById('turn-on-button').addEventListener('click', function () {
+      turnOnMachine();
+    });
+
     document.addEventListener('DOMContentLoaded', function () {
       turnOnMachine();
     });
   </script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/static/service-worker.js')
+      navigator.serviceWorker.register('{{ url_for("static", filename="service-worker.js") }}')
         .then(function (registration) {
           console.log('Service Worker registered with scope:', registration.scope);
         })

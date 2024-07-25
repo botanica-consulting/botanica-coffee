@@ -29,6 +29,21 @@
       font-size: 24px;
       margin-top: 20px;
     }
+
+    .button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      background-color: #007bff;
+      color: white;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 16px;
+    }
+
+    .button:hover {
+      background-color: #0056b3;
+    }
   </style>
 </head>
 
@@ -36,6 +51,7 @@
   <div class="container">
     <h1>Turn Off Machine</h1>
     <div class="spinner" id="spinner">Turning off...</div>
+    <button class="button" id="turn-off-button">Turn Off</button>
   </div>
 
   <script>
@@ -44,6 +60,10 @@
       const result = await response.json();
       document.getElementById('spinner').textContent = result.message;
     }
+
+    document.getElementById('turn-off-button').addEventListener('click', function () {
+      turnOffMachine();
+    });
 
     document.addEventListener('DOMContentLoaded', function () {
       turnOffMachine();

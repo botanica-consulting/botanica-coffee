@@ -9,11 +9,12 @@ import copy
 import urllib.request
 
 from dataclasses import dataclass, asdict
-from lmcloud.client_cloud import LaMarzoccoCloudClient
-from lmcloud.lm_machine import LaMarzoccoMachine
-from lmcloud.const import MachineModel, BoilerType
-from lmcloud.exceptions import AuthFail, RequestNotSuccessful
-from lmcloud.models import LaMarzoccoMachineConfig
+# from lmcloud.lm_machine import LaMarzoccoMachine
+# from lmcloud.const import MachineModel
+# from lmcloud.models import LaMarzoccoMachineConfig
+from pylamarzocco import LaMarzoccoCloudClient
+from pylamarzocco.const import BoilerType
+from pylamarzocco.exceptions import RequestNotSuccessful, AuthFail
 
 USERNAME = os.environ["USERNAME"]
 PASSWORD = os.environ["PASSWORD"]
@@ -55,36 +56,37 @@ class LaMarzoccoMachineWrapper:
         return asdict(self)
 
 
-@dataclass
-class LaMarzoccoMachineStatus:
-    turned_on: bool
-
-    steam_boiler_on: bool
-    steam_boiler_temp: int
-    steam_boiler_target_temp: int
-
-    main_boiler_on: bool
-    main_boiler_temp: int
-    main_boiler_target_temp: int
-
-    @staticmethod
-    def from_la_marzocco_machine_config(
-        config: LaMarzoccoMachineConfig,
-    ) -> "LaMarzoccoMachineStatus":
-        steam_boiler = config.boilers[BoilerType.STEAM]
-        main_boiler = config.boilers[BoilerType.COFFEE]
-        return LaMarzoccoMachineStatus(
-            turned_on=config.turned_on,
-            steam_boiler_on=steam_boiler.enabled,
-            steam_boiler_temp=steam_boiler.current_temperature,
-            steam_boiler_target_temp=steam_boiler.target_temperature,
-            main_boiler_on=main_boiler.enabled,
-            main_boiler_temp=main_boiler.current_temperature,
-            main_boiler_target_temp=main_boiler.target_temperature,
-        )
-
-    def to_dict(self):
-        return asdict(self)
+#
+# @dataclass
+# class LaMarzoccoMachineStatus:
+#     turned_on: bool
+#
+#     steam_boiler_on: bool
+#     steam_boiler_temp: int
+#     steam_boiler_target_temp: int
+#
+#     main_boiler_on: bool
+#     main_boiler_temp: int
+#     main_boiler_target_temp: int
+#
+#     @staticmethod
+#     def from_la_marzocco_machine_config(
+#             config: LaMarzoccoMachineConfig,
+#     ) -> "LaMarzoccoMachineStatus":
+#         steam_boiler = config.boilers[BoilerType.STEAM]
+#         main_boiler = config.boilers[BoilerType.COFFEE]
+#         return LaMarzoccoMachineStatus(
+#             turned_on=config.turned_on,
+#             steam_boiler_on=steam_boiler.enabled,
+#             steam_boiler_temp=steam_boiler.current_temperature,
+#             steam_boiler_target_temp=steam_boiler.target_temperature,
+#             main_boiler_on=main_boiler.enabled,
+#             main_boiler_temp=main_boiler.current_temperature,
+#             main_boiler_target_temp=main_boiler.target_temperature,
+#         )
+#
+#     def to_dict(self):
+#         return asdict(self)
 
 
 async def login() -> LaMarzoccoCloudClient:
@@ -93,24 +95,26 @@ async def login() -> LaMarzoccoCloudClient:
     return cloud_client
 
 
-async def get_machine(cloud_client: LaMarzoccoCloudClient) -> LaMarzoccoMachine:
-    try:
-        logger.info("getting machine...")
-        machine = await LaMarzoccoMachine.create(
-            MachineModel.LINEA_MICRA, SERIAL_NUMBER, NAME, cloud_client
-        )
-        logger.info("got machine successfully")
-    except AuthFail as e:
-        logger.error(f"failed to login to La Marzocco Cloud: {e}")
-        raise LaMarzoccoLambdaError("failed to login to La Marzocco Cloud")
-    except RequestNotSuccessful as e:
-        logger.error(f"failed to get machine: {e}")
-        raise LaMarzoccoLambdaError("failed to get machine")
-    return machine
+#
+# async def get_machine(cloud_client: LaMarzoccoCloudClient) -> LaMarzoccoMachine:
+#     try:
+#         logger.info("getting machine...")
+#         cloud_client.get_config
+#         machine = await LaMarzoccoMachine.create(
+#             LINEA_MICRA, SERIAL_NUMBER, NAME, cloud_client
+#         )
+#         logger.info("got machine successfully")
+#     except AuthFail as e:
+#         logger.error(f"failed to login to La Marzocco Cloud: {e}")
+#         raise LaMarzoccoLambdaError("failed to login to La Marzocco Cloud")
+#     except RequestNotSuccessful as e:
+#         logger.error(f"failed to get machine: {e}")
+#         raise LaMarzoccoLambdaError("failed to get machine")
+#     return machine
 
 
 async def list_machines(
-    cloud_client: LaMarzoccoCloudClient,
+        cloud_client: LaMarzoccoCloudClient,
 ) -> Dict[str, LaMarzoccoMachineWrapper]:
     machines: Dict[str, LaMarzoccoMachineWrapper] = {}
     try:
@@ -150,12 +154,18 @@ def parse_event(event: Dict) -> Dict:
 
 
 async def turn_on() -> Response:
+    return await set_power(True)
+
+
+async def turn_off() -> Response:
+    return await set_power(True)
+
+
+async def set_power(power):
     cloud_client = await login()
     logger.info("Logged in")
-    machine = await get_machine(cloud_client)
-    logger.info("Got machine")
     try:
-        if not await machine.set_power(True):
+        if not await cloud_client.set_power(SERIAL_NUMBER, power):
             logger.info("Set power failed")
             return Response(401, {"message": "failed to turn on machine"})
         logger.info("Set power success")
@@ -172,8 +182,8 @@ async def async_slack_handler(event, parsed_event, context, is_background) -> Re
                 "text": "The machine has been turned on."
             }
             data = json.dumps(response_message).encode('utf-8')
-            req = urllib.request.Request(parsed_event['response_url'], 
-                                         data=data, 
+            req = urllib.request.Request(parsed_event['response_url'],
+                                         data=data,
                                          headers={'Content-Type': 'application/json'})
             urllib.request.urlopen(req)
 
@@ -209,22 +219,13 @@ async def async_handler(event, context) -> Response:
             case "turn_on":
                 return await turn_on()
             case "turn_off":
-                cloud_client = await login()
-                machine = await get_machine(cloud_client)
-                try:
-                    if not await machine.set_power(False):
-                        return Response(400, {"message": "failed to turn off machine"})
-                    return Response(200, {})
-                except RequestNotSuccessful as e:
-                    return Response(
-                        400, {"message": "failed to turn off machine", "e": str(e)}
-                    )
-            case "get_status":
-                cloud_client = await login()
-                machine = await get_machine(cloud_client)
-                config = machine.config
-                status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
-                return Response(200, status.to_dict())
+                return await turn_off()
+            # case "get_status":
+            #     cloud_client = await login()
+            #     machine = await get_machine(cloud_client)
+            #     config = machine.config
+            #     status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
+            #     return Response(200, status.to_dict())
             case _:
                 return Response(400, {"message": f"unknown action {event['action']}"})
     except RequestNotSuccessful as e:

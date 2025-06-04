@@ -34,7 +34,7 @@ resource "null_resource" "docker_build_and_push" {
 
   provisioner "local-exec" {
     command    = <<-EOT
-      docker build -t ${aws_ecr_repository.lambda_repository.repository_url}:${local.build_hash} . &&
+      docker build -t ${aws_ecr_repository.lambda_repository.repository_url}:${local.build_hash} . --load --platform linux/amd64 &&
       aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${aws_ecr_repository.lambda_repository.repository_url} &&
       docker push ${aws_ecr_repository.lambda_repository.repository_url}:${local.build_hash}
     EOT
@@ -79,7 +79,7 @@ resource "aws_iam_role" "lambda_iam_role" {
           Effect   = "Allow"
         },
         {
-          Action = "lambda:InvokeFunction",
+          Action   = "lambda:InvokeFunction",
           Resource = "arn:aws:lambda:*:*:function:coffee_lambda",
           Effect   = "Allow"
         },
@@ -88,29 +88,23 @@ resource "aws_iam_role" "lambda_iam_role" {
   }
 }
 
-variable "lm-username" {
+variable "lm_username" {
   description = "La Marzocco cloud username"
   type        = string
-  sensitive = true
-  
+  sensitive   = true
+
 }
 
-variable "lm-password" {
+variable "lm_password" {
   description = "La Marzocco cloud password"
   type        = string
-  sensitive = true
+  sensitive   = true
 }
 
-variable "lm-name" {
-  description = "Target machine name"
-  type        = string
-  sensitive = true
-}
-
-variable "lm-serial" {
+variable "lm_serial" {
   description = "Target machine serial number"
   type        = string
-  sensitive = true
+  sensitive   = true
 }
 
 # Lambda Function 1
@@ -127,10 +121,10 @@ resource "aws_lambda_function" "docker_lambda" {
 
   environment {
     variables = {
-      USERNAME = var.lm-username
-      PASSWORD = var.lm-password
-      NAME = var.lm-name
-      SERIAL_NUMBER = var.lm-serial
+      USERNAME             = var.lm_username
+      PASSWORD             = var.lm_password
+      NAME                 = var.lm_serial
+      SERIAL_NUMBER        = var.lm_serial
       docker_build_trigger = "${local.build_hash}"
     }
   }
@@ -172,7 +166,7 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   ]
 
   rest_api_id = aws_api_gateway_rest_api.lambda_api.id
-  stage_name  = "prod"
+  stage_name = "prod"
 
   # Force a new deployment on changes using the correct tolist syntax
   triggers = {
@@ -187,10 +181,16 @@ resource "aws_lambda_permission" "api_gateway_lambda" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.docker_lambda.function_name
-  principal     = "apigateway.amazonaws.com"
+  principal = "apigateway.amazonaws.com"
 
   # Ensure that the source ARN is specific to the method requesting access
   source_arn = "${aws_api_gateway_rest_api.lambda_api.execution_arn}/*/*"
+}
+
+resource "aws_api_gateway_stage" "api_stage" {
+  rest_api_id   = aws_api_gateway_rest_api.lambda_api.id
+  deployment_id = aws_api_gateway_deployment.api_deployment.id
+  stage_name    = "prod"
 }
 
 output "lambda_function_name" {

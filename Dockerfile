@@ -1,10 +1,15 @@
 FROM public.ecr.aws/lambda/python:3.12
+ENV UV_SYSTEM_PYTHON=1
+# Install uv
+RUN pip install uv
 
-# Copy requirements.txt
-COPY requirements.txt ${LAMBDA_TASK_ROOT}
+# Copy uv.lock and pyproject.toml
+COPY uv.lock pyproject.toml ${LAMBDA_TASK_ROOT}/
 
-# Install the specified packages
-RUN pip install -r requirements.txt
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+RUN uv pip install . --system
+# Install dependencies from uv.lock
 
 # Copy function code
 COPY lambda_function.py ${LAMBDA_TASK_ROOT}

@@ -10,6 +10,28 @@ provider "aws" {
 
 data "aws_caller_identity" "current" {}
 
+# S3 bucket for storing installation keys
+resource "aws_s3_bucket" "installation_keys" {
+  bucket = "botanica-coffee-installation-keys-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_versioning" "installation_keys_versioning" {
+  bucket = aws_s3_bucket.installation_keys.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "installation_keys_encryption" {
+  bucket = aws_s3_bucket.installation_keys.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 
 # ECR Repository for Docker image
 resource "aws_ecr_repository" "lambda_repository" {
@@ -62,30 +84,6 @@ resource "aws_iam_role" "lambda_iam_role" {
       },
     ]
   })
-
-  # IAM Policy to allow Lambda to log to CloudWatch
-  inline_policy {
-    name = "LambdaCloudWatchLoggingPolicy"
-    policy = jsonencode({
-      Version = "2012-10-17"
-      Statement = [
-        {
-          Action = [
-            "logs:CreateLogGroup",
-            "logs:CreateLogStream",
-            "logs:PutLogEvents"
-          ],
-          Resource = "arn:aws:logs:*:*:*",
-          Effect   = "Allow"
-        },
-        {
-          Action   = "lambda:InvokeFunction",
-          Resource = "arn:aws:lambda:*:*:function:coffee_lambda",
-          Effect   = "Allow"
-        },
-      ]
-    })
-  }
 }
 
 variable "lm_username" {
@@ -125,6 +123,7 @@ resource "aws_lambda_function" "docker_lambda" {
       PASSWORD             = var.lm_password
       NAME                 = var.lm_serial
       SERIAL_NUMBER        = var.lm_serial
+      S3_BUCKET            = aws_s3_bucket.installation_keys.bucket
       docker_build_trigger = "${local.build_hash}"
     }
   }
@@ -219,5 +218,27 @@ data "aws_iam_policy_document" "lambda_policy" {
       "logs:PutLogEvents"
     ]
     resources = ["arn:aws:logs:*:*:*"]
+  }
+  
+  statement {
+    actions = [
+      "lambda:InvokeFunction"
+    ]
+    resources = ["arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:coffee_lambda"]
+  }
+  
+  statement {
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject"
+    ]
+    resources = ["${aws_s3_bucket.installation_keys.arn}/*"]
+  }
+  
+  statement {
+    actions = [
+      "s3:ListBucket"
+    ]
+    resources = ["${aws_s3_bucket.installation_keys.arn}"]
   }
 }

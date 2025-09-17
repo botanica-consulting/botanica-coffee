@@ -1,18 +1,21 @@
 import asyncio
 import os
 import logging
-from typing import Dict
+from typing import Dict, Any, Coroutine
 from urllib.parse import parse_qs
 import json
 import boto3
 import copy
 import urllib.request
+import uuid
+from botocore.exceptions import ClientError
 
 from dataclasses import dataclass, asdict
 # from lmcloud.lm_machine import LaMarzoccoMachine
 # from lmcloud.const import MachineModel
 # from lmcloud.models import LaMarzoccoMachineConfig
 from pylamarzocco import LaMarzoccoCloudClient
+from pylamarzocco.util import InstallationKey, generate_installation_key
 from pylamarzocco.const import BoilerType
 from pylamarzocco.exceptions import RequestNotSuccessful, AuthFail
 
@@ -21,6 +24,8 @@ PASSWORD = os.environ["PASSWORD"]
 SERIAL_NUMBER = os.environ["SERIAL_NUMBER"]
 NAME = os.environ["NAME"]
 DEBUG = os.environ.get("DEBUG", False)
+S3_BUCKET = os.environ.get("S3_BUCKET")
+INSTALLATION_KEY_FILE = "installation_key.json"
 
 logger = logging.getLogger()
 if DEBUG:
@@ -31,6 +36,39 @@ else:
 
 class LaMarzoccoLambdaError(Exception):
     pass
+
+
+async def get_or_create_installation_key() -> tuple[InstallationKey, bool]:
+    """Get installation key from S3 or create a new one if it doesn't exist."""
+    s3_client = boto3.client('s3')
+
+    try:
+        # Try to get existing key from S3
+        logger.info(f"Attempting to retrieve installation key from S3: {S3_BUCKET}/{INSTALLATION_KEY_FILE}")
+        response = s3_client.get_object(Bucket=S3_BUCKET, Key=INSTALLATION_KEY_FILE)
+        key_json = response['Body'].read().decode('utf-8')
+        logger.info("Installation key found in S3, loading existing key")
+        return InstallationKey.from_json(key_json), False
+
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            # Key doesn't exist, create a new one
+            logger.info("Installation key not found in S3, generating new key")
+            installation_key = generate_installation_key(str(uuid.uuid4()).lower())
+
+            # Store the new key in S3
+            key_json = installation_key.to_json()
+            s3_client.put_object(
+                Bucket=S3_BUCKET,
+                Key=INSTALLATION_KEY_FILE,
+                Body=key_json,
+                ContentType='application/json'
+            )
+            logger.info("New installation key generated and stored in S3")
+            return installation_key, True
+        else:
+            logger.error(f"Error retrieving installation key from S3: {e}")
+            raise
 
 
 @dataclass
@@ -56,61 +94,13 @@ class LaMarzoccoMachineWrapper:
         return asdict(self)
 
 
-#
-# @dataclass
-# class LaMarzoccoMachineStatus:
-#     turned_on: bool
-#
-#     steam_boiler_on: bool
-#     steam_boiler_temp: int
-#     steam_boiler_target_temp: int
-#
-#     main_boiler_on: bool
-#     main_boiler_temp: int
-#     main_boiler_target_temp: int
-#
-#     @staticmethod
-#     def from_la_marzocco_machine_config(
-#             config: LaMarzoccoMachineConfig,
-#     ) -> "LaMarzoccoMachineStatus":
-#         steam_boiler = config.boilers[BoilerType.STEAM]
-#         main_boiler = config.boilers[BoilerType.COFFEE]
-#         return LaMarzoccoMachineStatus(
-#             turned_on=config.turned_on,
-#             steam_boiler_on=steam_boiler.enabled,
-#             steam_boiler_temp=steam_boiler.current_temperature,
-#             steam_boiler_target_temp=steam_boiler.target_temperature,
-#             main_boiler_on=main_boiler.enabled,
-#             main_boiler_temp=main_boiler.current_temperature,
-#             main_boiler_target_temp=main_boiler.target_temperature,
-#         )
-#
-#     def to_dict(self):
-#         return asdict(self)
-
-
 async def login() -> LaMarzoccoCloudClient:
     logger.info("creating LaMarzoccoCloudClient object")
-    cloud_client = LaMarzoccoCloudClient(USERNAME, PASSWORD)
+    installation_key, new_key = await get_or_create_installation_key()
+    cloud_client = LaMarzoccoCloudClient(USERNAME, PASSWORD, installation_key)
+    if new_key:
+        await cloud_client.async_register_client()
     return cloud_client
-
-
-#
-# async def get_machine(cloud_client: LaMarzoccoCloudClient) -> LaMarzoccoMachine:
-#     try:
-#         logger.info("getting machine...")
-#         cloud_client.get_config
-#         machine = await LaMarzoccoMachine.create(
-#             LINEA_MICRA, SERIAL_NUMBER, NAME, cloud_client
-#         )
-#         logger.info("got machine successfully")
-#     except AuthFail as e:
-#         logger.error(f"failed to login to La Marzocco Cloud: {e}")
-#         raise LaMarzoccoLambdaError("failed to login to La Marzocco Cloud")
-#     except RequestNotSuccessful as e:
-#         logger.error(f"failed to get machine: {e}")
-#         raise LaMarzoccoLambdaError("failed to get machine")
-#     return machine
 
 
 async def list_machines(
@@ -153,11 +143,11 @@ def parse_event(event: Dict) -> Dict:
             raise LaMarzoccoLambdaError(f"Unsupported Content-Type: {content_type}")
 
 
-async def turn_on() -> Response:
+async def turn_on() -> tuple[bool, str]:
     return await set_power(True)
 
 
-async def turn_off() -> Response:
+async def turn_off() -> tuple[bool, str]:
     return await set_power(True)
 
 
@@ -167,19 +157,19 @@ async def set_power(power):
     try:
         if not await cloud_client.set_power(SERIAL_NUMBER, power):
             logger.info("Set power failed")
-            return Response(401, {"message": "failed to turn on machine"})
+            return False, "failed to turn on machine"
         logger.info("Set power success!")
-        return Response(200, {})
+        return True, "Great success"
     except RequestNotSuccessful as e:
-        return Response(400, {"message": "failed to turn on machine", "e": str(e)})
+        return False, "failed to turn on machine: " + str(e)
 
 
-async def async_slack_handler(event, parsed_event, context, is_background) -> Response:
+async def async_slack_handler(event, parsed_event, context, is_background) -> Response | None:
     if ["/tired"] == parsed_event["command"] or "/tired" == parsed_event["command"]:
         if is_background:
-            t = await turn_on()
+            t, message = await turn_on()
             response_message = {
-                "text": "The machine has been turned on."
+                "text": "The machine has been turned on." if t else "Unable to turn on." + message,
             }
             data = json.dumps(response_message).encode('utf-8')
             req = urllib.request.Request(parsed_event['response_url'],
@@ -187,7 +177,7 @@ async def async_slack_handler(event, parsed_event, context, is_background) -> Re
                                          headers={'Content-Type': 'application/json'})
             urllib.request.urlopen(req)
 
-            return t
+            return
         else:
             # Invoke the background processing asynchronously
             lambda_client = boto3.client("lambda")
@@ -209,29 +199,7 @@ async def async_handler(event, context) -> Response:
     if "action" not in event:
         return await async_slack_handler(original_event, event, context, is_background)
 
-    logger.info(f'Got action: {event["action"]}')
-    try:
-        match event["action"]:
-            case "list_machines":
-                cloud_client = await login()
-                machines = await list_machines(cloud_client)
-                return Response(200, machines)
-            case "turn_on":
-                return await turn_on()
-            case "turn_off":
-                return await turn_off()
-            # case "get_status":
-            #     cloud_client = await login()
-            #     machine = await get_machine(cloud_client)
-            #     config = machine.config
-            #     status = LaMarzoccoMachineStatus.from_la_marzocco_machine_config(config)
-            #     return Response(200, status.to_dict())
-            case _:
-                return Response(400, {"message": f"unknown action {event['action']}"})
-    except RequestNotSuccessful as e:
-        return Response(400, {"message": "request not successful", "e": str(e)})
-    except LaMarzoccoLambdaError as e:
-        return Response(400, {"message": str(e)})
+    return Response(400, "Missing action")
 
 
 def handler(event, context):

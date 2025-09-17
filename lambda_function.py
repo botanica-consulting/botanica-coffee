@@ -168,7 +168,7 @@ async def set_power(power):
         if not await cloud_client.set_power(SERIAL_NUMBER, power):
             logger.info("Set power failed")
             return Response(401, {"message": "failed to turn on machine"})
-        logger.info("Set power success")
+        logger.info("Set power success!")
         return Response(200, {})
     except RequestNotSuccessful as e:
         return Response(400, {"message": "failed to turn on machine", "e": str(e)})
